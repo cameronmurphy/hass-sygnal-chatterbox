@@ -28,7 +28,7 @@ class SygnalApi:
             self._url, json=payload, timeout=aiohttp.ClientTimeout(total=15)
         ) as resp:
             resp.raise_for_status()
-            return await resp.json()
+            return await resp.json(content_type=None)
 
     async def fetch_table(
         self, table: str, start: int, length: int
