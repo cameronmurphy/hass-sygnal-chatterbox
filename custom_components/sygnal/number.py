@@ -7,7 +7,7 @@ import asyncio
 from homeassistant.components.number import NumberDeviceClass, NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTemperature
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -58,6 +58,13 @@ class SygnalZoneSetpoint(CoordinatorEntity[SygnalCoordinator], NumberEntity):
             manufacturer="Sygnal",
             model="Connect12",
         )
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Ignore coordinator updates while holding optimistic state."""
+        if self._optimistic_value is not None:
+            return
+        super()._handle_coordinator_update()
 
     @property
     def name(self) -> str:

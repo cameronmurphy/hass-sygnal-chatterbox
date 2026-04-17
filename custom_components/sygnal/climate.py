@@ -14,7 +14,7 @@ from homeassistant.components.climate import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -81,6 +81,13 @@ class SygnalSystemClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
             manufacturer="Sygnal",
             model="Connect12",
         )
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Ignore coordinator updates while holding optimistic state."""
+        if self._optimistic_mode is not None or self._optimistic_temp is not None:
+            return
+        super()._handle_coordinator_update()
 
     @property
     def hvac_mode(self) -> HVACMode:
