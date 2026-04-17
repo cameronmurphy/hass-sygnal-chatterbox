@@ -159,7 +159,7 @@ class SygnalZoneClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
         | ClimateEntityFeature.TURN_ON
         | ClimateEntityFeature.TURN_OFF
     )
-    _attr_hvac_modes = [HVACMode.HEAT_COOL]
+    _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT_COOL]
 
     def __init__(
         self, coordinator: SygnalCoordinator, host: str, zone_index: int
