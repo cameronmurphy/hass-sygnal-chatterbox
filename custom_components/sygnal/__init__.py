@@ -15,7 +15,7 @@ from .coordinator import SygnalCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.CLIMATE, Platform.SELECT, Platform.SENSOR]
+PLATFORMS = [Platform.CLIMATE, Platform.SENSOR]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

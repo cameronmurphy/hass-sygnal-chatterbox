@@ -21,6 +21,22 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN, resolve_bit_offset, scale_setpoint_eng_to_raw
 from .coordinator import SygnalCoordinator
 
+_LOGGER = logging.getLogger(__name__)
+
+HA_HVAC_TO_SYGNAL = {
+    HVACMode.FAN_ONLY: 0,   # Vent
+    HVACMode.COOL: 1,
+    HVACMode.HEAT: 2,
+    HVACMode.HEAT_COOL: 3,  # Auto
+}
+
+SYGNAL_TO_HA_HVAC = {
+    "V": HVACMode.FAN_ONLY,
+    "C": HVACMode.COOL,
+    "H": HVACMode.HEAT,
+    "A": HVACMode.HEAT_COOL,
+}
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -31,19 +47,84 @@ async def async_setup_entry(
     coordinator: SygnalCoordinator = hass.data[DOMAIN][entry.entry_id]
     host = entry.data["host"]
 
-    async_add_entities(
-        SygnalZoneClimate(coordinator, host, i)
-        for i, zone in enumerate(coordinator.data.zones)
-        if zone.is_valid
-    )
+    entities: list[ClimateEntity] = [SygnalSystemClimate(coordinator, host)]
+
+    for i, zone in enumerate(coordinator.data.zones):
+        if zone.is_valid:
+            entities.append(SygnalZoneClimate(coordinator, host, i))
+
+    async_add_entities(entities)
+
+
+class SygnalSystemClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
+    """Climate entity for the system HVAC mode (no temperature control)."""
+
+    _attr_has_entity_name = True
+    _attr_name = "AC System"
+    _attr_temperature_unit = UnitOfTemperature.CELSIUS
+    _attr_supported_features = ClimateEntityFeature(0)
+    _attr_hvac_modes = [
+        HVACMode.FAN_ONLY,
+        HVACMode.COOL,
+        HVACMode.HEAT,
+        HVACMode.HEAT_COOL,
+    ]
+
+    def __init__(self, coordinator: SygnalCoordinator, host: str) -> None:
+        super().__init__(coordinator)
+        self._host = host
+        self._optimistic_mode: HVACMode | None = None
+        self._attr_unique_id = f"{host}_system"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, host)},
+            name="Sygnal Chatterbox",
+            manufacturer="Sygnal",
+            model="Connect12",
+        )
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        if self._optimistic_mode is not None:
+            actual = SYGNAL_TO_HA_HVAC.get(self.coordinator.data.hvac_mode)
+            if actual == self._optimistic_mode:
+                self._optimistic_mode = None
+            else:
+                return
+        super()._handle_coordinator_update()
+
+    @property
+    def hvac_mode(self) -> HVACMode:
+        if self._optimistic_mode is not None:
+            return self._optimistic_mode
+        return SYGNAL_TO_HA_HVAC.get(
+            self.coordinator.data.hvac_mode, HVACMode.HEAT_COOL
+        )
+
+    @property
+    def hvac_action(self) -> HVACAction:
+        data = self.coordinator.data
+        if data.unit_is_cooling:
+            return HVACAction.COOLING
+        if data.unit_is_heating:
+            return HVACAction.HEATING
+        if data.hvac_mode == "V":
+            return HVACAction.FAN
+        return HVACAction.IDLE
+
+    @property
+    def current_temperature(self) -> float | None:
+        return self.coordinator.data.return_temp
+
+    async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
+        value = HA_HVAC_TO_SYGNAL.get(hvac_mode)
+        if value is not None:
+            self._optimistic_mode = hvac_mode
+            self.async_write_ha_state()
+            await self.coordinator.api.write_paray(44, 3, value)
 
 
 class SygnalZoneClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
-    """Climate entity for a single zone.
-
-    The zone has two modes: Off and the current system mode (Heat/Cool/Vent/Auto).
-    The active mode label updates dynamically to match the system.
-    """
+    """Climate entity for a single zone."""
 
     _attr_has_entity_name = True
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
@@ -55,6 +136,7 @@ class SygnalZoneClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
         | ClimateEntityFeature.TURN_ON
         | ClimateEntityFeature.TURN_OFF
     )
+    _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT_COOL]
 
     def __init__(
         self, coordinator: SygnalCoordinator, host: str, zone_index: int
@@ -75,8 +157,6 @@ class SygnalZoneClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
     @property
     def _zone(self):
         return self.coordinator.data.zones[self._zone_index]
-
-    _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT_COOL]
 
     @callback
     def _handle_coordinator_update(self) -> None:
