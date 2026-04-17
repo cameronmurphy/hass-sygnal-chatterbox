@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-
 from homeassistant.components.number import NumberDeviceClass, NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTemperature
@@ -14,8 +12,6 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, scale_setpoint_eng_to_raw
 from .coordinator import SygnalCoordinator
-
-WRITE_SETTLE_SECONDS = 3
 
 
 async def async_setup_entry(
@@ -61,9 +57,13 @@ class SygnalZoneSetpoint(CoordinatorEntity[SygnalCoordinator], NumberEntity):
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        """Ignore coordinator updates while holding optimistic state."""
+        """Clear optimistic state only when device confirms the value."""
         if self._optimistic_value is not None:
-            return
+            zone = self.coordinator.data.zones[self._zone_index]
+            if zone.set_temp == self._optimistic_value:
+                self._optimistic_value = None
+            else:
+                return
         super()._handle_coordinator_update()
 
     @property
@@ -84,6 +84,3 @@ class SygnalZoneSetpoint(CoordinatorEntity[SygnalCoordinator], NumberEntity):
         self.async_write_ha_state()
         raw = scale_setpoint_eng_to_raw(value)
         await self.coordinator.api.write_paray(3 + self._zone_index, 0xFF, raw)
-        await asyncio.sleep(WRITE_SETTLE_SECONDS)
-        self._optimistic_value = None
-        await self.coordinator.async_request_refresh()

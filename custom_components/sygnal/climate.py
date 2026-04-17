@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
@@ -23,8 +22,6 @@ from .const import DOMAIN, scale_setpoint_eng_to_raw
 from .coordinator import SygnalCoordinator
 
 _LOGGER = logging.getLogger(__name__)
-
-WRITE_SETTLE_SECONDS = 3
 
 HA_HVAC_TO_SYGNAL = {
     HVACMode.FAN_ONLY: 0,   # Vent
@@ -84,9 +81,18 @@ class SygnalSystemClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        """Ignore coordinator updates while holding optimistic state."""
-        if self._optimistic_mode is not None or self._optimistic_temp is not None:
-            return
+        """Clear optimistic state only when device confirms the value."""
+        if self._optimistic_mode is not None:
+            actual = SYGNAL_TO_HA_HVAC.get(self.coordinator.data.hvac_mode)
+            if actual == self._optimistic_mode:
+                self._optimistic_mode = None
+            else:
+                return
+        if self._optimistic_temp is not None:
+            if self.coordinator.data.ac_set_temp == self._optimistic_temp:
+                self._optimistic_temp = None
+            else:
+                return
         super()._handle_coordinator_update()
 
     @property
@@ -124,9 +130,6 @@ class SygnalSystemClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
             self._optimistic_mode = hvac_mode
             self.async_write_ha_state()
             await self.coordinator.api.write_paray(44, 3, value)
-            await asyncio.sleep(WRITE_SETTLE_SECONDS)
-            self._optimistic_mode = None
-            await self.coordinator.async_request_refresh()
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         temp = kwargs.get(ATTR_TEMPERATURE)
@@ -135,6 +138,3 @@ class SygnalSystemClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
             self.async_write_ha_state()
             raw = scale_setpoint_eng_to_raw(temp)
             await self.coordinator.api.write_paray(1, 0xFF, raw)
-            await asyncio.sleep(WRITE_SETTLE_SECONDS)
-            self._optimistic_temp = None
-            await self.coordinator.async_request_refresh()

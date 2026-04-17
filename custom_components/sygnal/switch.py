@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
@@ -14,8 +13,6 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, resolve_bit_offset
 from .coordinator import SygnalCoordinator
-
-WRITE_SETTLE_SECONDS = 3
 
 
 async def async_setup_entry(
@@ -55,9 +52,13 @@ class SygnalZoneSwitch(CoordinatorEntity[SygnalCoordinator], SwitchEntity):
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        """Ignore coordinator updates while holding optimistic state."""
+        """Clear optimistic state only when device confirms the value."""
         if self._optimistic_state is not None:
-            return
+            actual = self.coordinator.data.zones[self._zone_index].is_on
+            if actual == self._optimistic_state:
+                self._optimistic_state = None
+            else:
+                return  # keep holding until device catches up
         super()._handle_coordinator_update()
 
     @property
@@ -70,19 +71,14 @@ class SygnalZoneSwitch(CoordinatorEntity[SygnalCoordinator], SwitchEntity):
             return self._optimistic_state
         return self.coordinator.data.zones[self._zone_index].is_on
 
-    async def _async_write_and_hold(self, on: bool) -> None:
-        """Write state, hold optimistic value, then refresh after delay."""
-        offset, mask = resolve_bit_offset(29, 1 << self._zone_index)
-        value = mask if on else 0
-        self._optimistic_state = on
-        self.async_write_ha_state()
-        await self.coordinator.api.write_paray(offset, mask, value)
-        await asyncio.sleep(WRITE_SETTLE_SECONDS)
-        self._optimistic_state = None
-        await self.coordinator.async_request_refresh()
-
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self._async_write_and_hold(True)
+        offset, mask = resolve_bit_offset(29, 1 << self._zone_index)
+        self._optimistic_state = True
+        self.async_write_ha_state()
+        await self.coordinator.api.write_paray(offset, mask, mask)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self._async_write_and_hold(False)
+        offset, mask = resolve_bit_offset(29, 1 << self._zone_index)
+        self._optimistic_state = False
+        self.async_write_ha_state()
+        await self.coordinator.api.write_paray(offset, mask, 0)
