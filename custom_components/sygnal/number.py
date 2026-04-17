@@ -15,7 +15,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN, scale_setpoint_eng_to_raw
 from .coordinator import SygnalCoordinator
 
-WRITE_HOLD_SECONDS = 5
+WRITE_SETTLE_SECONDS = 3
 
 
 async def async_setup_entry(
@@ -84,6 +84,6 @@ class SygnalZoneSetpoint(CoordinatorEntity[SygnalCoordinator], NumberEntity):
         self.async_write_ha_state()
         raw = scale_setpoint_eng_to_raw(value)
         await self.coordinator.api.write_paray(3 + self._zone_index, 0xFF, raw)
-        await asyncio.sleep(WRITE_HOLD_SECONDS)
+        await asyncio.sleep(WRITE_SETTLE_SECONDS)
         self._optimistic_value = None
         await self.coordinator.async_request_refresh()

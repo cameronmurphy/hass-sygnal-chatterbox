@@ -73,17 +73,25 @@ class SygnalApi:
         values, _ = await self.fetch_table("ee", start, length)
         return values
 
-    async def write_paray(self, offset: int, mask: int, value: int) -> None:
-        """Write a masked value to a paray byte (CMD_ALTER_PARAM)."""
+    async def write_paray(
+        self, offset: int, mask: int, value: int, retries: int = 4
+    ) -> None:
+        """Write a masked value to a paray byte (CMD_ALTER_PARAM).
+
+        The device requires multiple write attempts, matching the original
+        JS behaviour of 4 retries at 750ms intervals.
+        """
         async with self._write_lock:
-            await self._rpc(
-                "send_packet",
-                {
-                    "marker": "paw",
-                    "cmd": 0,
-                    "data": [offset, mask & 0xFF, value & 0xFF],
-                },
-            )
+            for _ in range(retries):
+                await self._rpc(
+                    "send_packet",
+                    {
+                        "marker": "paw",
+                        "cmd": 0,
+                        "data": [offset, mask & 0xFF, value & 0xFF],
+                    },
+                )
+                await asyncio.sleep(0.75)
 
     async def write_ee_block(
         self, block_index: int, v0: int, v1: int, v2: int, v3: int

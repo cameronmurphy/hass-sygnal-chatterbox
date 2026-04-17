@@ -15,7 +15,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN, resolve_bit_offset
 from .coordinator import SygnalCoordinator
 
-WRITE_HOLD_SECONDS = 5
+WRITE_SETTLE_SECONDS = 3
 
 
 async def async_setup_entry(
@@ -77,7 +77,7 @@ class SygnalZoneSwitch(CoordinatorEntity[SygnalCoordinator], SwitchEntity):
         self._optimistic_state = on
         self.async_write_ha_state()
         await self.coordinator.api.write_paray(offset, mask, value)
-        await asyncio.sleep(WRITE_HOLD_SECONDS)
+        await asyncio.sleep(WRITE_SETTLE_SECONDS)
         self._optimistic_state = None
         await self.coordinator.async_request_refresh()
 

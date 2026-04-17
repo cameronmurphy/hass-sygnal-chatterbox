@@ -24,7 +24,7 @@ from .coordinator import SygnalCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-WRITE_HOLD_SECONDS = 5
+WRITE_SETTLE_SECONDS = 3
 
 HA_HVAC_TO_SYGNAL = {
     HVACMode.FAN_ONLY: 0,   # Vent
@@ -124,7 +124,7 @@ class SygnalSystemClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
             self._optimistic_mode = hvac_mode
             self.async_write_ha_state()
             await self.coordinator.api.write_paray(44, 3, value)
-            await asyncio.sleep(WRITE_HOLD_SECONDS)
+            await asyncio.sleep(WRITE_SETTLE_SECONDS)
             self._optimistic_mode = None
             await self.coordinator.async_request_refresh()
 
@@ -135,6 +135,6 @@ class SygnalSystemClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
             self.async_write_ha_state()
             raw = scale_setpoint_eng_to_raw(temp)
             await self.coordinator.api.write_paray(1, 0xFF, raw)
-            await asyncio.sleep(WRITE_HOLD_SECONDS)
+            await asyncio.sleep(WRITE_SETTLE_SECONDS)
             self._optimistic_temp = None
             await self.coordinator.async_request_refresh()
