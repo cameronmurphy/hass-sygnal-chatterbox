@@ -1,0 +1,18 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Sygnal Chatterbox",
+        "data": {
+          "host": "IP Address or Hostname"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the Chatterbox device"
+    },
+    "abort": {
+      "already_configured": "Device is already configured"
+    }
+  }
+}
