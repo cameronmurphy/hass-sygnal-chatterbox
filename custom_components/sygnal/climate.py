@@ -27,14 +27,14 @@ HA_HVAC_TO_SYGNAL = {
     HVACMode.FAN_ONLY: 0,   # Vent
     HVACMode.COOL: 1,
     HVACMode.HEAT: 2,
-    HVACMode.HEAT_COOL: 3,  # Auto
+    HVACMode.AUTO: 3,        # Auto
 }
 
 SYGNAL_TO_HA_HVAC = {
     "V": HVACMode.FAN_ONLY,
     "C": HVACMode.COOL,
     "H": HVACMode.HEAT,
-    "A": HVACMode.HEAT_COOL,
+    "A": HVACMode.AUTO,
 }
 
 
@@ -67,10 +67,10 @@ class SygnalSystemClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
     _attr_target_temperature_step = 0.5
     _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
     _attr_hvac_modes = [
-        HVACMode.FAN_ONLY,
-        HVACMode.COOL,
         HVACMode.HEAT,
-        HVACMode.HEAT_COOL,
+        HVACMode.COOL,
+        HVACMode.AUTO,
+        HVACMode.FAN_ONLY,
     ]
 
     def __init__(self, coordinator: SygnalCoordinator, host: str) -> None:
@@ -106,7 +106,7 @@ class SygnalSystemClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
         if self._optimistic_mode is not None:
             return self._optimistic_mode
         return SYGNAL_TO_HA_HVAC.get(
-            self.coordinator.data.hvac_mode, HVACMode.HEAT_COOL
+            self.coordinator.data.hvac_mode, HVACMode.AUTO
         )
 
     @property
@@ -184,13 +184,7 @@ class SygnalZoneClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
     def _zone(self):
         return self.coordinator.data.zones[self._zone_index]
 
-    @property
-    def hvac_modes(self) -> list[HVACMode]:
-        """Return Off + the current system mode."""
-        system_mode = SYGNAL_TO_HA_HVAC.get(
-            self.coordinator.data.hvac_mode, HVACMode.HEAT_COOL
-        )
-        return [HVACMode.OFF, system_mode]
+    _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT_COOL]
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -213,11 +207,7 @@ class SygnalZoneClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
     @property
     def hvac_mode(self) -> HVACMode:
         is_on = self._optimistic_on if self._optimistic_on is not None else self._zone.is_on
-        if not is_on:
-            return HVACMode.OFF
-        return SYGNAL_TO_HA_HVAC.get(
-            self.coordinator.data.hvac_mode, HVACMode.HEAT_COOL
-        )
+        return HVACMode.HEAT_COOL if is_on else HVACMode.OFF
 
     @property
     def hvac_action(self) -> HVACAction:
