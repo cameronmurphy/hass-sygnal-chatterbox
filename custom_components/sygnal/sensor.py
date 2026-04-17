@@ -94,9 +94,15 @@ async def async_setup_entry(
     coordinator: SygnalCoordinator = hass.data[DOMAIN][entry.entry_id]
     host = entry.data["host"]
 
-    async_add_entities(
+    entities: list[SensorEntity] = [
         SygnalSensor(coordinator, host, desc) for desc in SENSOR_DESCRIPTIONS
-    )
+    ]
+
+    for i, zone in enumerate(coordinator.data.zones):
+        if zone.is_valid:
+            entities.append(SygnalZoneTempSensor(coordinator, host, i))
+
+    async_add_entities(entities)
 
 
 class SygnalSensor(CoordinatorEntity[SygnalCoordinator], SensorEntity):
@@ -124,3 +130,33 @@ class SygnalSensor(CoordinatorEntity[SygnalCoordinator], SensorEntity):
     @property
     def native_value(self) -> float | None:
         return self.entity_description.value_fn(self.coordinator.data)
+
+
+class SygnalZoneTempSensor(CoordinatorEntity[SygnalCoordinator], SensorEntity):
+    """Current temperature sensor for a zone."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+
+    def __init__(
+        self, coordinator: SygnalCoordinator, host: str, zone_index: int
+    ) -> None:
+        super().__init__(coordinator)
+        self._zone_index = zone_index
+        self._attr_unique_id = f"{host}_zone_{zone_index}_temp"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, host)},
+            name="Sygnal Chatterbox",
+            manufacturer="Sygnal",
+            model="Connect12",
+        )
+
+    @property
+    def name(self) -> str:
+        return f"{self.coordinator.data.zones[self._zone_index].name} Temperature"
+
+    @property
+    def native_value(self) -> float | None:
+        return self.coordinator.data.zones[self._zone_index].actual_temp
