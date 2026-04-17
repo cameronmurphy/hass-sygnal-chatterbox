@@ -23,13 +23,6 @@ from .coordinator import SygnalCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-SHARED_HVAC_MODES = [
-    HVACMode.OFF,
-    HVACMode.FAN_ONLY,  # Vent
-    HVACMode.COOL,
-    HVACMode.HEAT,
-]
-
 HA_HVAC_TO_SYGNAL = {
     HVACMode.FAN_ONLY: 0,   # Vent
     HVACMode.COOL: 1,
@@ -43,17 +36,6 @@ SYGNAL_TO_HA_HVAC = {
     "H": HVACMode.HEAT,
     "A": HVACMode.HEAT_COOL,
 }
-
-
-def _system_hvac_mode(coordinator: SygnalCoordinator) -> HVACMode:
-    """Get the current system HVAC mode mapped to HA."""
-    mode = SYGNAL_TO_HA_HVAC.get(coordinator.data.hvac_mode, HVACMode.HEAT_COOL)
-    # Map Auto to Heat for display since Auto isn't in the shared modes list
-    if mode == HVACMode.HEAT_COOL:
-        if coordinator.data.unit_is_cooling:
-            return HVACMode.COOL
-        return HVACMode.HEAT
-    return mode
 
 
 async def async_setup_entry(
@@ -84,7 +66,12 @@ class SygnalSystemClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
     _attr_max_temp = 30.0
     _attr_target_temperature_step = 0.5
     _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
-    _attr_hvac_modes = SHARED_HVAC_MODES
+    _attr_hvac_modes = [
+        HVACMode.FAN_ONLY,
+        HVACMode.COOL,
+        HVACMode.HEAT,
+        HVACMode.HEAT_COOL,
+    ]
 
     def __init__(self, coordinator: SygnalCoordinator, host: str) -> None:
         super().__init__(coordinator)
@@ -102,7 +89,7 @@ class SygnalSystemClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
     @callback
     def _handle_coordinator_update(self) -> None:
         if self._optimistic_mode is not None:
-            actual = _system_hvac_mode(self.coordinator)
+            actual = SYGNAL_TO_HA_HVAC.get(self.coordinator.data.hvac_mode)
             if actual == self._optimistic_mode:
                 self._optimistic_mode = None
             else:
@@ -118,7 +105,9 @@ class SygnalSystemClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
     def hvac_mode(self) -> HVACMode:
         if self._optimistic_mode is not None:
             return self._optimistic_mode
-        return _system_hvac_mode(self.coordinator)
+        return SYGNAL_TO_HA_HVAC.get(
+            self.coordinator.data.hvac_mode, HVACMode.HEAT_COOL
+        )
 
     @property
     def hvac_action(self) -> HVACAction:
@@ -142,8 +131,6 @@ class SygnalSystemClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
         return self.coordinator.data.ac_set_temp
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
-        if hvac_mode == HVACMode.OFF:
-            return  # system doesn't have a global off
         value = HA_HVAC_TO_SYGNAL.get(hvac_mode)
         if value is not None:
             self._optimistic_mode = hvac_mode
@@ -162,8 +149,8 @@ class SygnalSystemClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
 class SygnalZoneClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
     """Climate entity for a single zone.
 
-    Selecting a mode (Heat/Cool/Vent) turns the zone on AND sets the
-    system HVAC mode for all zones. Selecting Off turns the zone off.
+    The zone has two modes: Off and the current system mode (Heat/Cool/Vent/Auto).
+    The active mode label updates dynamically to match the system.
     """
 
     _attr_has_entity_name = True
@@ -176,7 +163,6 @@ class SygnalZoneClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
         | ClimateEntityFeature.TURN_ON
         | ClimateEntityFeature.TURN_OFF
     )
-    _attr_hvac_modes = SHARED_HVAC_MODES
 
     def __init__(
         self, coordinator: SygnalCoordinator, host: str, zone_index: int
@@ -185,7 +171,6 @@ class SygnalZoneClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
         self._host = host
         self._zone_index = zone_index
         self._optimistic_on: bool | None = None
-        self._optimistic_mode: HVACMode | None = None
         self._optimistic_temp: float | None = None
         self._attr_unique_id = f"{host}_zone_{zone_index}"
         self._attr_device_info = DeviceInfo(
@@ -199,17 +184,19 @@ class SygnalZoneClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
     def _zone(self):
         return self.coordinator.data.zones[self._zone_index]
 
+    @property
+    def hvac_modes(self) -> list[HVACMode]:
+        """Return Off + the current system mode."""
+        system_mode = SYGNAL_TO_HA_HVAC.get(
+            self.coordinator.data.hvac_mode, HVACMode.HEAT_COOL
+        )
+        return [HVACMode.OFF, system_mode]
+
     @callback
     def _handle_coordinator_update(self) -> None:
         if self._optimistic_on is not None:
             if self._zone.is_on == self._optimistic_on:
                 self._optimistic_on = None
-            else:
-                return
-        if self._optimistic_mode is not None:
-            actual = _system_hvac_mode(self.coordinator)
-            if actual == self._optimistic_mode:
-                self._optimistic_mode = None
             else:
                 return
         if self._optimistic_temp is not None:
@@ -228,9 +215,9 @@ class SygnalZoneClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
         is_on = self._optimistic_on if self._optimistic_on is not None else self._zone.is_on
         if not is_on:
             return HVACMode.OFF
-        if self._optimistic_mode is not None:
-            return self._optimistic_mode
-        return _system_hvac_mode(self.coordinator)
+        return SYGNAL_TO_HA_HVAC.get(
+            self.coordinator.data.hvac_mode, HVACMode.HEAT_COOL
+        )
 
     @property
     def hvac_action(self) -> HVACAction:
@@ -259,15 +246,7 @@ class SygnalZoneClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
         if hvac_mode == HVACMode.OFF:
             await self.async_turn_off()
         else:
-            # Turn zone on AND set the system HVAC mode
-            offset, mask = resolve_bit_offset(29, 1 << self._zone_index)
-            sygnal_mode = HA_HVAC_TO_SYGNAL.get(hvac_mode)
-            self._optimistic_on = True
-            self._optimistic_mode = hvac_mode
-            self.async_write_ha_state()
-            await self.coordinator.api.write_paray(offset, mask, mask)
-            if sygnal_mode is not None:
-                await self.coordinator.api.write_paray(44, 3, sygnal_mode)
+            await self.async_turn_on()
 
     async def async_turn_on(self) -> None:
         offset, mask = resolve_bit_offset(29, 1 << self._zone_index)
