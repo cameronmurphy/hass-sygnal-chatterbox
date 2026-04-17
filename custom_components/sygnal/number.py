@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from homeassistant.components.number import NumberDeviceClass, NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTemperature
@@ -12,6 +14,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, scale_setpoint_eng_to_raw
 from .coordinator import SygnalCoordinator
+
+WRITE_HOLD_SECONDS = 5
 
 
 async def async_setup_entry(
@@ -46,6 +50,7 @@ class SygnalZoneSetpoint(CoordinatorEntity[SygnalCoordinator], NumberEntity):
     ) -> None:
         super().__init__(coordinator)
         self._zone_index = zone_index
+        self._optimistic_value: float | None = None
         self._attr_unique_id = f"{host}_zone_{zone_index}_setpoint"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, host)},
@@ -60,12 +65,18 @@ class SygnalZoneSetpoint(CoordinatorEntity[SygnalCoordinator], NumberEntity):
 
     @property
     def native_value(self) -> float | None:
+        if self._optimistic_value is not None:
+            return self._optimistic_value
         zone = self.coordinator.data.zones[self._zone_index]
         if zone.mode == "T":
             return zone.set_temp
         return None
 
     async def async_set_native_value(self, value: float) -> None:
+        self._optimistic_value = value
+        self.async_write_ha_state()
         raw = scale_setpoint_eng_to_raw(value)
         await self.coordinator.api.write_paray(3 + self._zone_index, 0xFF, raw)
+        await asyncio.sleep(WRITE_HOLD_SECONDS)
+        self._optimistic_value = None
         await self.coordinator.async_request_refresh()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
@@ -13,6 +14,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, resolve_bit_offset
 from .coordinator import SygnalCoordinator
+
+WRITE_HOLD_SECONDS = 5
 
 
 async def async_setup_entry(
@@ -41,6 +44,7 @@ class SygnalZoneSwitch(CoordinatorEntity[SygnalCoordinator], SwitchEntity):
     ) -> None:
         super().__init__(coordinator)
         self._zone_index = zone_index
+        self._optimistic_state: bool | None = None
         self._attr_unique_id = f"{host}_zone_{zone_index}_switch"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, host)},
@@ -55,14 +59,23 @@ class SygnalZoneSwitch(CoordinatorEntity[SygnalCoordinator], SwitchEntity):
 
     @property
     def is_on(self) -> bool:
+        if self._optimistic_state is not None:
+            return self._optimistic_state
         return self.coordinator.data.zones[self._zone_index].is_on
 
-    async def async_turn_on(self, **kwargs: Any) -> None:
+    async def _async_write_and_hold(self, on: bool) -> None:
+        """Write state, hold optimistic value, then refresh after delay."""
         offset, mask = resolve_bit_offset(29, 1 << self._zone_index)
-        await self.coordinator.api.write_paray(offset, mask, mask)
+        value = mask if on else 0
+        self._optimistic_state = on
+        self.async_write_ha_state()
+        await self.coordinator.api.write_paray(offset, mask, value)
+        await asyncio.sleep(WRITE_HOLD_SECONDS)
+        self._optimistic_state = None
         await self.coordinator.async_request_refresh()
 
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self._async_write_and_hold(True)
+
     async def async_turn_off(self, **kwargs: Any) -> None:
-        offset, mask = resolve_bit_offset(29, 1 << self._zone_index)
-        await self.coordinator.api.write_paray(offset, mask, 0)
-        await self.coordinator.async_request_refresh()
+        await self._async_write_and_hold(False)

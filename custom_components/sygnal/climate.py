@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -22,6 +23,8 @@ from .const import DOMAIN, scale_setpoint_eng_to_raw
 from .coordinator import SygnalCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+WRITE_HOLD_SECONDS = 5
 
 HA_HVAC_TO_SYGNAL = {
     HVACMode.FAN_ONLY: 0,   # Vent
@@ -69,6 +72,8 @@ class SygnalSystemClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
     def __init__(self, coordinator: SygnalCoordinator, host: str) -> None:
         super().__init__(coordinator)
         self._host = host
+        self._optimistic_mode: HVACMode | None = None
+        self._optimistic_temp: float | None = None
         self._attr_unique_id = f"{host}_system"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, host)},
@@ -79,6 +84,8 @@ class SygnalSystemClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
 
     @property
     def hvac_mode(self) -> HVACMode:
+        if self._optimistic_mode is not None:
+            return self._optimistic_mode
         return SYGNAL_TO_HA_HVAC.get(
             self.coordinator.data.hvac_mode, HVACMode.HEAT_COOL
         )
@@ -100,17 +107,27 @@ class SygnalSystemClimate(CoordinatorEntity[SygnalCoordinator], ClimateEntity):
 
     @property
     def target_temperature(self) -> float | None:
+        if self._optimistic_temp is not None:
+            return self._optimistic_temp
         return self.coordinator.data.ac_set_temp
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         value = HA_HVAC_TO_SYGNAL.get(hvac_mode)
         if value is not None:
+            self._optimistic_mode = hvac_mode
+            self.async_write_ha_state()
             await self.coordinator.api.write_paray(44, 3, value)
+            await asyncio.sleep(WRITE_HOLD_SECONDS)
+            self._optimistic_mode = None
             await self.coordinator.async_request_refresh()
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         temp = kwargs.get(ATTR_TEMPERATURE)
         if temp is not None:
+            self._optimistic_temp = temp
+            self.async_write_ha_state()
             raw = scale_setpoint_eng_to_raw(temp)
             await self.coordinator.api.write_paray(1, 0xFF, raw)
+            await asyncio.sleep(WRITE_HOLD_SECONDS)
+            self._optimistic_temp = None
             await self.coordinator.async_request_refresh()
